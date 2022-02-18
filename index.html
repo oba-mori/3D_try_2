@@ -2,181 +2,173 @@
 AR
 hit-test
 
-途中
-
 <参考>
-https://qiita.com/NestVisual/items/a5030d4298cfbcb8b0af
+https://ysko909.github.io/posts/make-ar-with-a-frame-and-gltf/
 -->
 
+<!doctype html>
+<!--
+Copyright 2020 The Immersive Web Community Group
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+-->
+<html>
+  <head>
+    <meta charset='utf-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1, user-scalable=no'>
+    <meta name='mobile-web-app-capable' content='yes'>
+    <meta name='apple-mobile-web-app-capable' content='yes'>
+    <link rel='icon' type='image/png' sizes='32x32' href='favicon-32x32.png'>
+    <link rel='icon' type='image/png' sizes='96x96' href='favicon-96x96.png'>
+    <link rel='stylesheet' href='css/common.css'>
 
+    <title>Barebones AR</title>
+  </head>
+  <body>
+    <div id="overlay">
+      <header>
+        <details open>
+          <summary>Barebones WebXR DOM Overlay</summary>
+          <p>
+            This sample demonstrates extremely simple use of an "immersive-ar"
+            session with no library dependencies, with an optional DOM overlay.
+            It doesn't render anything exciting, just draws a rectangle with a
+            slowly changing color to prove it's working.
+            <a class="back" href="./index.html">Back</a>
+          </p>
+          <div id="session-info"></div>
+          <div id="pose"></div>
+          <div id="warning-zone"></div>
+          <button id="xr-button" class="barebones-button" disabled>XR not found</button>
+        </details>
+      </header>
+    </div>
+    <main style='text-align: center;'>
+      <p>Click 'Enter AR' to see content</p>
+    </main>
+    <script type="module">
+      // XR globals.
+      let xrButton = document.getElementById('xr-button');
+      let xrSession = null;
+      let xrRefSpace = null;
 
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-    <meta charset="utf-8">
-    <title>モデル表示サンプル</title>
-</head>
+      // WebGL scene globals.
+      let gl = null;
 
-<body style="margin : 0px; overflow: hidden;">
-    <video id="myVideo" autoplay="true" muted playsinline="true" style="object-fit: cover;"></video>
-    <canvas id="myCanvas" style="position: absolute; left: 0px; top:0px; z-index:2; pointer-events: none; "></canvas>
+      function checkSupportedState() {
+        navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
+          if (supported) {
+            xrButton.innerHTML = 'Enter AR';
+          } else {
+            xrButton.innerHTML = 'AR not found';
+          }
 
-    <!-- Three.js (CDN) -->
-    <script src="https://unpkg.com/three@0.110.0/build/three.min.js"></script>
-    <script src="https://unpkg.com/three@0.110.0/examples/js/controls/OrbitControls.js"></script>
-    <script src="https://unpkg.com/three@0.110.0/examples/js/loaders/GLTFLoader.js"></script>
-    <!-- <script src="https://raw.githack.com/AR-js-org/AR.js/master/three.js/build/ar.js"></script> -->
-    <script src="three.js/build/ar.min.js"></script>
+          xrButton.disabled = !supported;
+        });
+      }
 
-    <script>
-        //////////////////////////////////////////////////////////////////////////////////
-        //      カメラの初期化
-        //////////////////////////////////////////////////////////////////////////////////
-        // カメラに要求するカメラ解像度
-        var requireWidth = 640;
-        var requireHeight = 480;
-
-        var videoWidth;
-        var videoHeight;
-
-        var videoElement = document.getElementById('myVideo');
-
-        var mode = "environment"; // インカメラを優先する場合"user"
-        var constraints = {
-            video: {
-                width: requireWidth,
-                height: requireHeight,
-                facingMode: mode,
-            },
-            audio: false
-        };
-
-        // getUserMedia成功時
-        var onOpenStream = function(stream){
-            // 実際のカメラ解像度を取得
-            var track = stream.getTracks()[0];
-            var setting = track.getSettings();
-            videoWidth = setting.width;
-            videoHeight = setting.height;
-            videoElement.srcObject = stream;
-            InitCanvas();
+      function initXR() {
+        if (!window.isSecureContext) {
+          let message = "WebXR unavailable due to insecure context";
+          document.getElementById("warning-zone").innerText = message;
         }
 
-        // カメラの初期化
-        if (navigator.mediaDevices.getUserMedia != null) {
-            navigator.mediaDevices.getUserMedia(constraints)
-                .then(function(stream) {
-                    onOpenStream(stream);
-                })
-                .catch(function(err){
-                    window.alert("カメラの初期化に失敗しました。端末およびブラウザの設定で、カメラへのアクセスが許可されているかを確認してください。");
-                });
+        if (navigator.xr) {
+          xrButton.addEventListener('click', onButtonClicked);
+          navigator.xr.addEventListener('devicechange', checkSupportedState);
+          checkSupportedState();
         }
-        else{
-            window.alert("このブラウザはWebRTCのカメラ初期化に対応していません。");
+      }
+
+      function onButtonClicked() {
+        if (!xrSession) {
+            // Ask for an optional DOM Overlay, see https://immersive-web.github.io/dom-overlays/
+            navigator.xr.requestSession('immersive-ar', {
+                optionalFeatures: ['dom-overlay'],
+                domOverlay: {root: document.getElementById('overlay')}
+            }).then(onSessionStarted, onRequestSessionError);
+        } else {
+          xrSession.end();
+        }
+      }
+
+      function onSessionStarted(session) {
+        xrSession = session;
+        xrButton.innerHTML = 'Exit AR';
+
+        // Show which type of DOM Overlay got enabled (if any)
+        if (session.domOverlayState) {
+          document.getElementById('session-info').innerHTML = 'DOM Overlay type: ' + session.domOverlayState.type;
         }
 
+        session.addEventListener('end', onSessionEnded);
+        let canvas = document.createElement('canvas');
+        gl = canvas.getContext('webgl', {
+          xrCompatible: true
+        });
+        session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+        session.requestReferenceSpace('local').then((refSpace) => {
+          xrRefSpace = refSpace;
+          session.requestAnimationFrame(onXRFrame);
+        });
+      }
 
-        // キャンバスの初期化
-        var InitCanvas = function(){
-            //////////////////////////////////////////////////////////////////////////////////
-            //      キャンバスの初期化
-            //////////////////////////////////////////////////////////////////////////////////
-            var canvasElement = document.querySelector('#myCanvas');
-            //canvasElement.setSize( videoWidth, videoHeight );
+      function onRequestSessionError(ex) {
+        alert("Failed to start immersive AR session.");
+        console.error(ex.message);
+      }
 
-            // renderer
-            var renderer    = new THREE.WebGLRenderer({
-                canvas: canvasElement,
-                antialias: true,
-                alpha: true
-            });
-            renderer.setClearColor(new THREE.Color('black'), 0)
-            renderer.setPixelRatio(window.devicePixelRatio);
-            renderer.setSize( videoWidth, videoHeight );
+      function onEndSession(session) {
+        session.end();
+      }
 
-            //////////////////////////////////////////////////////////////////////////////////
-            //      シーンの初期化
-            //////////////////////////////////////////////////////////////////////////////////
-            var scene = new THREE.Scene();
+      function onSessionEnded(event) {
+        xrSession = null;
+        xrButton.innerHTML = 'Enter AR';
+        document.getElementById('session-info').innerHTML = '';
+        gl = null;
+      }
 
-            //////////////////////////////////////////////////////////////////////////////////
-            //      arの初期化
-            //////////////////////////////////////////////////////////////////////////////////
-            var arToolkitContext = new THREEx.ArToolkitContext({
-                cameraParametersUrl: THREEx.ArToolkitContext.baseURL + '../data/data/camera_para.dat',
-                detectionMode: 'color_and_matrix',
-                matrixCodeType: '4x4_BCH_13_9_3',
-                patternRatio: 0.80, // マーカー作成時のpatternRatioに合わせる
-                maxDetectionRate: 10,
-                canvasWidth: videoWidth,
-                canvasHeight: videoHeight,
-            })
-            arToolkitContext.init(function onCompleted(){
-            })
+      function onXRFrame(t, frame) {
+        let session = frame.session;
+        session.requestAnimationFrame(onXRFrame);
 
-            //////////////////////////////////////////////////////////////////////////////////
-            //      マーカーが読み込まれると表示されるオブジェクトを、シーンに追加します。
-            //////////////////////////////////////////////////////////////////////////////////
-            var markerRoot = new THREE.Group();
-            scene.add(markerRoot);
-            var markerControls = new THREEx.ArMarkerControls(arToolkitContext, markerRoot, {
-                type : 'pattern',
-                patternUrl : "pattern-marker.patt",
-                changeMatrixMode : 'modelViewMatrix',
-                minConfidence: 0.50
-            })
+        gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
 
-            //////////////////////////////////////////////////////////////////////////////////
-            //      カメラの作成
-            //////////////////////////////////////////////////////////////////////////////////
-            const camera = new THREE.PerspectiveCamera(60, videoWidth / videoHeight, 0.01, 100); // 今回は原点配置のまま
+        // Update the clear color so that we can observe the color in the
+        // headset changing over time. Use a scissor rectangle to keep the AR
+        // scene visible.
+        const width = session.renderState.baseLayer.framebufferWidth;
+        const height = session.renderState.baseLayer.framebufferHeight;
+        gl.enable(gl.SCISSOR_TEST);
+        gl.scissor(width / 4, height / 4, width / 2, height / 2);
+        let time = Date.now();
+        gl.clearColor(Math.cos(time / 2000), Math.cos(time / 4000), Math.cos(time / 6000), 0.5);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-            //////////////////////////////////////////////////////////////////////////////////
-            //      マウス操作（OrbitControls）
-            //////////////////////////////////////////////////////////////////////////////////
-            // controls = new THREE.OrbitControls( camera, renderer.domElement );
-            // controls.target.set( 0, 0, 0 );
-            // controls.update();
-
-            //////////////////////////////////////////////////////////////////////////////////
-            //      オブジェクトのロード
-            //////////////////////////////////////////////////////////////////////////////////
-            var obj;
-            var loader = new THREE.GLTFLoader();
-            var url = "cube.glb";
-            loader.load( url, function(data) {
-                obj = data.scene;
-                markerRoot.add( obj ); // マーカーで表示されるオブジェクトの下に配置します。
-            }, undefined, function ( error ) {
-                console.error( error );
-            } );
-
-            //////////////////////////////////////////////////////////////////////////////////
-            //      ライティング
-            //////////////////////////////////////////////////////////////////////////////////
-            // 平行光源を作成
-            const directionalLight = new THREE.DirectionalLight(0xFFFFFF);
-            directionalLight.position.set(1, 1, 5);
-            scene.add(directionalLight);
-            // 環境光を追加
-            const light = new THREE.HemisphereLight(0xFFFFFF, 0x333333, 2.0);
-            light.position.set(1, 5, 1);
-            scene.add(light);
-
-            //////////////////////////////////////////////////////////////////////////////////
-            //      毎フレームの描画処理
-            //////////////////////////////////////////////////////////////////////////////////
-            drawFrame();
-            function drawFrame() {
-                // 映像を解析してARを実行
-                arToolkitContext.update( videoElement );
-
-                renderer.render(scene, camera);
-                requestAnimationFrame(drawFrame);
-            }
+        let pose = frame.getViewerPose(xrRefSpace);
+        if (pose) {
+          const p = pose.transform.position;
+          document.getElementById('pose').innerText = "Position: " +
+            p.x.toFixed(3) + ", " + p.y.toFixed(3) + ", " + p.z.toFixed(3);
+        } else {
+          document.getElementById('pose').innerText = "Position: (null pose)";
         }
+      }
+
+      initXR();
     </script>
-</body>
-
+  </body>
 </html>
